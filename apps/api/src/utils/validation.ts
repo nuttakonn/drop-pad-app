@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const workspaceIdSchema = z.string().regex(/^[a-f0-9]{8}$/)
+export const workspaceIdSchema = z.string().regex(/^[a-zA-Z0-9-]{3,32}$/)
 
 export const createNoteSchema = z.object({
   content: z.string().min(1).max(50000)

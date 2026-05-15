@@ -38,6 +38,7 @@ DropPad runs on Cloudflare for free. Follow these simple steps to get your own i
 - **Zero Friction**: No accounts, no logins, no persistent tracking.
 - **Support for All Files**: Share `.drawio`, `.pdf`, Office docs, images, and code snippets.
 - **Clipboard-First**: Paste images or text directly (**Ctrl+V**) for instant sharing.
+- **Join by ID**: Enter a specific **Workspace ID** to join an existing session.
 - **Advanced Uploads**: Queue-based multi-file uploads with real-time progress.
 - **Self-Cleaning**: Automated 24-hour expiration keeps your data ephemeral and private.
 - **Mobile Hand-off**: Integrated QR code sharing for quick mobile access.
@@ -46,7 +47,8 @@ DropPad runs on Cloudflare for free. Follow these simple steps to get your own i
 ## 📖 System Guide
 
 ### Using your Workspace
-- **Create**: Click "Create Workspace" on the landing page to get a private URL.
+- **Create**: Click "Create New Workspace" on the landing page for a fresh session.
+- **Join**: If your team already has a workspace, enter the **Workspace ID** (e.g., `my-team-notes`) in the join box.
 - **Share**: Use the **Share** button to copy the link or the **QR Code** icon for mobile access.
 - **Notes**: Type directly into the text area. Markdown is supported (e.g., `### Header`, `**Bold**`).
 - **Files**: Drag files into the browser window or use the **Upload** button. 

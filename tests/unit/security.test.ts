@@ -3,15 +3,16 @@ import { workspaceIdSchema, sanitizeFilename, allowedMimeTypes } from '../../app
 
 describe('Security Validation', () => {
   describe('Workspace ID Validation', () => {
-    it('should accept valid 8-char hex IDs', () => {
+    it('should accept valid names', () => {
       expect(workspaceIdSchema.safeParse('abcd1234').success).toBe(true)
-      expect(workspaceIdSchema.safeParse('01234567').success).toBe(true)
+      expect(workspaceIdSchema.safeParse('my-room-123').success).toBe(true)
+      expect(workspaceIdSchema.safeParse('abc').success).toBe(true)
     })
 
     it('should reject invalid IDs', () => {
-      expect(workspaceIdSchema.safeParse('abcd123').success).toBe(false) // too short
-      expect(workspaceIdSchema.safeParse('abcd12345').success).toBe(false) // too long
-      expect(workspaceIdSchema.safeParse('abcd123g').success).toBe(false) // non-hex
+      expect(workspaceIdSchema.safeParse('ab').success).toBe(false) // too short
+      expect(workspaceIdSchema.safeParse('a'.repeat(33)).success).toBe(false) // too long
+      expect(workspaceIdSchema.safeParse('room name').success).toBe(false) // spaces
       expect(workspaceIdSchema.safeParse('../test').success).toBe(false) // traversal attempt
     })
   })

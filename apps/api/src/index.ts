@@ -26,6 +26,24 @@ app.use('*', securityHeaders)
 app.onError(errorHandler)
 
 app.get('/health', (c) => c.json({ status: 'ok', env: c.env.APP_ENV }))
+
+// Check Workspace Existence
+app.get('/api/workspaces/:id/exists', async (c) => {
+  const id = c.req.param('id')
+  if (!workspaceIdSchema.safeParse(id).success) {
+    return c.json({ exists: false }, 400)
+  }
+  
+  const workspace = await c.env.DB.prepare(
+    'SELECT expires_at FROM workspaces WHERE id = ?'
+  ).bind(id).first()
+
+  if (!workspace) return c.json({ exists: false }, 404)
+  
+  const isExpired = new Date(workspace.expires_at as string) < new Date()
+  return c.json({ exists: !isExpired })
+})
+
 app.get('/ready', async (c) => {
   // Check DB and Storage availability
   try {
@@ -38,18 +56,53 @@ app.get('/ready', async (c) => {
 
 // Create Workspace
 app.post('/api/workspaces', async (c) => {
-  const id = crypto.randomUUID().split('-')[0] // 8 chars
+  let id = crypto.randomUUID().split('-')[0] // default random 8 chars
+  
+  const body = await c.req.json().catch(() => ({}))
+  const hasCustomId = !!body.id && workspaceIdSchema.safeParse(body.id).success
+  if (hasCustomId) {
+    id = body.id
+  }
+
   const now = new Date()
   const expireMinutes = parseInt(c.env.WORKSPACE_EXPIRE_MINUTES || '1440')
   const expiresAt = new Date(now.getTime() + expireMinutes * 60000)
 
-  await c.env.DB.prepare(
-    'INSERT INTO workspaces (id, created_at, expires_at) VALUES (?, ?, ?)'
-  )
-    .bind(id, now.toISOString(), expiresAt.toISOString())
-    .run()
+  // If custom ID provided, check if it's already active
+  if (hasCustomId) {
+    const existing = await c.env.DB.prepare(
+      'SELECT expires_at FROM workspaces WHERE id = ?'
+    ).bind(id).first()
 
-  trackEvent(AnalyticsEvent.WORKSPACE_CREATED, { id })
+    if (existing) {
+      const existingExpiry = new Date(existing.expires_at as string)
+      if (existingExpiry > now) {
+        throw new HTTPException(409, { message: 'Workspace ID already exists and is active' })
+      } else {
+        // Recreate expired custom workspace
+        await c.env.DB.prepare('DELETE FROM workspace_items WHERE workspace_id = ?').bind(id).run()
+        await c.env.DB.prepare('UPDATE workspaces SET created_at = ?, expires_at = ? WHERE id = ?')
+          .bind(now.toISOString(), expiresAt.toISOString(), id)
+          .run()
+      }
+    } else {
+      // New custom workspace
+      await c.env.DB.prepare(
+        'INSERT INTO workspaces (id, created_at, expires_at) VALUES (?, ?, ?)'
+      )
+        .bind(id, now.toISOString(), expiresAt.toISOString())
+        .run()
+    }
+  } else {
+    // New random workspace
+    await c.env.DB.prepare(
+      'INSERT INTO workspaces (id, created_at, expires_at) VALUES (?, ?, ?)'
+    )
+      .bind(id, now.toISOString(), expiresAt.toISOString())
+      .run()
+  }
+
+  trackEvent(AnalyticsEvent.WORKSPACE_CREATED, { id, isCustom: hasCustomId })
 
   return c.json({ id, expiresAt: expiresAt.toISOString() }, 201)
 })

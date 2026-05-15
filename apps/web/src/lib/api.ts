@@ -62,9 +62,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  createWorkspace: () => request<{ id: string; expiresAt: string }>('/api/workspaces', { method: 'POST' }),
+  createWorkspace: (id?: string) => request<{ id: string; expiresAt: string }>('/api/workspaces', { 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: id ? JSON.stringify({ id }) : undefined
+  }),
   
   getWorkspace: (id: string) => request<Workspace>(`/api/workspaces/${id}`),
+  
+  checkWorkspaceExists: (id: string) => request<{ exists: boolean }>(`/api/workspaces/${id}/exists`),
   
   deleteItem: (workspaceId: string, itemId: string) => request<{ success: true }>(`/api/workspaces/${workspaceId}/items/${itemId}`, {
     method: 'DELETE',
