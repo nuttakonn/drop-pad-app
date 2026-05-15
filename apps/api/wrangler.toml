@@ -1,0 +1,19 @@
+name = "droppad-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+
+[[r2_buckets]]
+binding = "droppad"
+bucket_name = "droppad"
+
+[[d1_databases]]
+binding = "droppad_db"
+database_name = "droppad-db"
+database_id = "cc8f44a4-68d2-48c1-bcb3-9f30ba65cb5e"
+
+[vars]
+APP_ENV = "production"
+WORKSPACE_EXPIRE_MINUTES = "1440"
+MAX_UPLOAD_SIZE_MB = "50"
+MAX_FILES_PER_WORKSPACE = "100"
+MAX_TOTAL_WORKSPACE_SIZE_MB = "500"

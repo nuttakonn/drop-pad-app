@@ -1,0 +1,19 @@
+{
+  "name": "drop-pad-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/**\" dev",
+    "build": "pnpm --recursive --filter \"./apps/**\" build",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive exec tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0",
+    "prettier": "^3.2.5"
+  }
+}
