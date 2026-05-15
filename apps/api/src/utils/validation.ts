@@ -15,7 +15,19 @@ export const allowedMimeTypes = [
   'text/plain',
   'text/markdown',
   'application/json',
-  'application/zip'
+  'application/zip',
+  // Microsoft Office
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  // Specialized types
+  'application/vnd.jgraph.drawio',
+  'application/xml',
+  'text/xml',
+  'image/svg+xml'
 ]
 
 export function sanitizeFilename(filename: string): string {

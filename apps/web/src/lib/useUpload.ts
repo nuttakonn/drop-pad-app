@@ -89,11 +89,16 @@ export function useUpload(workspaceId: string, onSuccess: () => void) {
     setUploads((prev) => prev.filter((u) => u.status !== 'completed'));
   }, []);
 
+  const removeUpload = useCallback((id: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
   return {
     uploads,
     uploadFile,
     cancelUpload,
     retryUpload,
     clearCompleted,
+    removeUpload,
   };
 }

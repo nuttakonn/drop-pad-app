@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   File as FileIcon, Type, Upload, ArrowLeft, Download, Clock, 
   ExternalLink, Loader2, AlertCircle, Copy, QrCode, X, 
-  RotateCcw, ImageIcon, FileText
+  RotateCcw, ImageIcon, FileText, Trash2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import toast from 'react-hot-toast';
@@ -31,7 +31,7 @@ export default function WorkspacePage() {
     retry: 1,
   });
 
-  const { uploads, uploadFile, cancelUpload, retryUpload } = useUpload(id!, () => {
+  const { uploads, uploadFile, cancelUpload, retryUpload, removeUpload } = useUpload(id!, () => {
     queryClient.invalidateQueries({ queryKey: ['workspace', id] });
   });
 
@@ -92,6 +92,17 @@ export default function WorkspacePage() {
       toast.error(err.message || 'Failed to add note');
     }
 
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (itemId: string) => api.deleteItem(id!, itemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace', id] });
+      toast.success('Item deleted');
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Failed to delete item');
+    }
   });
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -283,6 +294,11 @@ export default function WorkspacePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    {(u.status === 'error' || u.status === 'cancelled') && (
+                      <button onClick={() => removeUpload(u.id)} className="p-2 text-gray-400 hover:bg-gray-100 hover:text-red-500 rounded-xl" title="Remove">
+                        <Trash2 size={18} />
+                      </button>
+                    )}
                     {u.status === 'error' && (
                       <button onClick={() => retryUpload(u.id)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl" title="Retry">
                         <RotateCcw size={18} />
@@ -328,6 +344,18 @@ export default function WorkspacePage() {
                       <Copy size={18} />
                     </button>
                   )}
+                  <button 
+                    onClick={() => {
+                      if (confirm('Delete this item?')) {
+                        deleteMutation.mutate(item.id);
+                      }
+                    }}
+                    disabled={deleteMutation.isPending}
+                    className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all disabled:opacity-50"
+                    title="Delete item"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 </div>
               </div>
               

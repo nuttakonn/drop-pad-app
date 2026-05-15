@@ -213,6 +213,35 @@ app.get('/api/files/:workspaceId/:itemId', async (c) => {
     return new Response(object.body, { headers })
 })
 
+// Delete Item
+app.delete('/api/workspaces/:workspaceId/items/:itemId', async (c) => {
+    const { workspaceId, itemId } = c.req.param()
+    
+    if (!workspaceIdSchema.safeParse(workspaceId).success) {
+      throw new HTTPException(400, { message: 'Invalid workspace ID' })
+    }
+
+    const item = await c.env.DB.prepare(
+        'SELECT * FROM workspace_items WHERE id = ? AND workspace_id = ?'
+    ).bind(itemId, workspaceId).first()
+
+    if (!item) throw new HTTPException(404, { message: 'Item not found' })
+
+    if (item.type === 'file' && item.file_key) {
+      try {
+        await c.env.STORAGE.delete(item.file_key as string)
+      } catch (err: any) {
+        console.error(`[Delete Error] Failed to delete R2 object ${item.file_key}:`, err)
+      }
+    }
+
+    await c.env.DB.prepare(
+        'DELETE FROM workspace_items WHERE id = ? AND workspace_id = ?'
+    ).bind(itemId, workspaceId).run()
+
+    return c.json({ success: true })
+})
+
 // Cron Trigger Handler
 export { app }
 export default {

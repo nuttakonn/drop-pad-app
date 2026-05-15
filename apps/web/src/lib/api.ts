@@ -63,8 +63,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   createWorkspace: () => request<{ id: string; expiresAt: string }>('/api/workspaces', { method: 'POST' }),
+  
   getWorkspace: (id: string) => request<Workspace>(`/api/workspaces/${id}`),
   
+  deleteItem: (workspaceId: string, itemId: string) => request<{ success: true }>(`/api/workspaces/${workspaceId}/items/${itemId}`, {
+    method: 'DELETE',
+  }),
+
   uploadFile: (id: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -92,11 +97,15 @@ export const api = {
       });
 
       xhr.addEventListener('load', () => {
-        const data = JSON.parse(xhr.responseText || '{}');
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(data);
-        } else {
-          reject(new ApiError(data.error || 'Upload failed', xhr.status, data.code));
+        try {
+          const data = JSON.parse(xhr.responseText || '{}');
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data);
+          } else {
+            reject(new ApiError(data.error || 'Upload failed', xhr.status, data.code));
+          }
+        } catch (e) {
+          reject(new ApiError('Invalid response from server', 500));
         }
       });
 
