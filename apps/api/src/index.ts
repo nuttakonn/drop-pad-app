@@ -151,8 +151,17 @@ app.post('/api/workspaces/:id/files', async (c) => {
     throw new HTTPException(400, { message: 'Invalid workspace ID' })
   }
 
-  const formData = await c.req.parseBody()
-  const file = formData['file']
+  const maxSize = parseInt(c.env.MAX_UPLOAD_SIZE_MB || '50') * 1024 * 1024
+  
+  // Early check via Content-Length header
+  const contentLength = c.req.header('Content-Length')
+  if (contentLength && parseInt(contentLength) > maxSize + 1024 * 100) { // 100KB buffer for multipart
+    trackEvent(AnalyticsEvent.UPLOAD_FAILURE, { workspaceId, reason: 'FILE_TOO_LARGE_CONTENT_LENGTH', size: contentLength })
+    throw new HTTPException(413, { message: 'File too large' })
+  }
+
+  const formData = await c.req.raw.formData()
+  const file = formData.get('file')
 
   if (!(file instanceof File)) {
     throw new HTTPException(400, { message: 'No file uploaded or invalid format' })
@@ -164,10 +173,9 @@ app.post('/api/workspaces/:id/files', async (c) => {
     throw new HTTPException(400, { message: `File type ${file.type} not allowed` })
   }
 
-  const maxSize = parseInt(c.env.MAX_UPLOAD_SIZE_MB || '50') * 1024 * 1024
   if (file.size > maxSize) {
     trackEvent(AnalyticsEvent.UPLOAD_FAILURE, { workspaceId, reason: 'FILE_TOO_LARGE', size: file.size })
-    throw new HTTPException(400, { message: 'File too large' })
+    throw new HTTPException(413, { message: 'File too large' })
   }
 
   // Check workspace exists and not expired

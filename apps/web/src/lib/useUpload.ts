@@ -11,10 +11,18 @@ export interface UploadStatus {
   controller?: AbortController;
 }
 
+const MAX_FILE_SIZE = 512 * 1024 * 1024; // 512MB matching wrangler.toml
+
 export function useUpload(workspaceId: string, onSuccess: () => void) {
   const [uploads, setUploads] = useState<UploadStatus[]>([]);
 
   const uploadFile = useCallback(async (file: File) => {
+    // Client-side size validation
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error(`File too large: ${file.name} (Max ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+      return;
+    }
+
     const uploadId = crypto.randomUUID();
     const controller = new AbortController();
 

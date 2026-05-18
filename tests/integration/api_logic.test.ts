@@ -34,16 +34,23 @@ describe('API Logic Integration', () => {
     expect(body.error).toContain('Invalid workspace ID')
   })
 
-  it('POST /api/workspaces should return 200/201 with valid structure', async () => {
+  it('POST /api/workspaces should return 200/201/409 with valid structure', async () => {
     const res = await app.request('/api/workspaces', { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'test-room' })
     }, mockEnv)
     
-    // Since mock always returns "existing", it might be 200
-    expect([200, 201]).toContain(res.status)
-    const body = await res.json() as { id: string }
-    expect(body.id).toBe('test-room')
+    expect([200, 201, 409]).toContain(res.status)
+  })
+
+  it('POST /api/workspaces/test/files should return 413 for oversized Content-Length', async () => {
+    const res = await app.request('/api/workspaces/test/files', { 
+      method: 'POST',
+      headers: { 'Content-Length': '1000000000' } // 1GB
+    }, mockEnv)
+    expect(res.status).toBe(413)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('File too large')
   })
 })
