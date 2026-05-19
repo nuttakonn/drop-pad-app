@@ -1,6 +1,7 @@
 name = "droppad-api"
 main = "src/index.ts"
 compatibility_date = "2026-05-15"
+compatibility_flags = ["nodejs_compat"]
 
 [[r2_buckets]]
 binding = "STORAGE"
@@ -17,3 +18,4 @@ WORKSPACE_EXPIRE_MINUTES = "1440"
 MAX_UPLOAD_SIZE_MB = "512"
 MAX_FILES_PER_WORKSPACE = "100"
 MAX_TOTAL_WORKSPACE_SIZE_MB = "2048"
+R2_BUCKET_NAME = "droppad"

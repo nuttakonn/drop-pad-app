@@ -1,7 +1,9 @@
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  password_hash TEXT,
+  salt TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workspace_items (

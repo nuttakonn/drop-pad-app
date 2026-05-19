@@ -1,16 +1,18 @@
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Plus, ArrowRight, Hash } from 'lucide-react';
+import { Plus, ArrowRight, Hash, Lock as LockIcon, ShieldCheck, Shield as ShieldIcon } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState('');
+  const [password, setPassword] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   
   const createMutation = useMutation({
-    mutationFn: (id?: string) => api.createWorkspace(id),
+    mutationFn: ({ id, password }: { id?: string, password?: string }) => api.createWorkspace(id, password),
     onSuccess: (data: { id: string }) => {
       navigate(`/${data.id}`);
     },
@@ -55,20 +57,47 @@ export default function LandingPage() {
       
       <div className="w-full max-w-md space-y-6">
         {/* Quick Create */}
-        <button
-          onClick={() => createMutation.mutate(undefined)}
-          disabled={createMutation.isPending}
-          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-bold text-lg transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 shadow-xl shadow-blue-100"
-        >
-          {createMutation.isPending && !roomId ? (
-            'Creating...'
-          ) : (
-            <>
-              <Plus size={24} />
-              Create New Workspace
-            </>
-          )}
-        </button>
+        <div className="space-y-4">
+          <button
+            onClick={() => createMutation.mutate({ password: password.trim() || undefined })}
+            disabled={createMutation.isPending}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-bold text-lg transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 shadow-xl shadow-blue-100"
+          >
+            {createMutation.isPending && !roomId ? (
+              'Creating...'
+            ) : (
+              <>
+                <Plus size={24} />
+                Create New Workspace
+              </>
+            )}
+          </button>
+
+          <div className="text-left">
+            <button 
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-xs font-bold text-gray-400 hover:text-blue-500 uppercase tracking-widest flex items-center gap-2 px-1 transition-colors"
+            >
+              {showAdvanced ? <ShieldCheck size={14} /> : <ShieldIcon size={14} />}
+              {showAdvanced ? 'Hide Security Options' : 'Secure with Password'}
+            </button>
+            
+            {showAdvanced && (
+              <div className="mt-3 relative animate-in slide-in-from-top-2 duration-200">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                  <LockIcon size={16} />
+                </div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Optional password"
+                  className="w-full pl-11 pr-4 py-3 bg-white border-2 border-gray-100 rounded-xl focus:border-blue-500 focus:outline-none transition-all font-medium text-gray-900 shadow-sm text-sm"
+                />
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="relative">
           <div className="absolute inset-0 flex items-center">

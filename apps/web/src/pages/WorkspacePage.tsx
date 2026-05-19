@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   File as FileIcon, Type, Upload, ArrowLeft, Download, Clock, 
   ExternalLink, Loader2, AlertCircle, Copy, QrCode, X, 
-  RotateCcw, ImageIcon, FileText, Trash2
+  RotateCcw, ImageIcon, FileText, Trash2, Lock as LockIcon, Shield as ShieldIcon
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import toast from 'react-hot-toast';
@@ -21,6 +21,7 @@ export default function WorkspacePage() {
   const [showQr, setShowQr] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
+  const [password, setPassword] = useState('');
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: workspace, isLoading, error } = useQuery({
@@ -28,7 +29,21 @@ export default function WorkspacePage() {
     queryFn: () => api.getWorkspace(id!),
     enabled: !!id,
     refetchInterval: 5000,
-    retry: 1,
+    retry: (failureCount, error: any) => {
+      if (error?.status === 401) return false;
+      return failureCount < 2;
+    },
+  });
+
+  const authMutation = useMutation({
+    mutationFn: (pwd: string) => api.authWorkspace(id!, pwd),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace', id] });
+      toast.success('Authenticated');
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Invalid password');
+    }
   });
 
   const { uploads, uploadFile, cancelUpload, retryUpload, removeUpload } = useUpload(id!, () => {
@@ -136,6 +151,51 @@ export default function WorkspacePage() {
   if (error || isExpired) {
     const apiErr = error as any;
     const isReallyExpired = isExpired || (apiErr && apiErr.status === 410);
+    const isProtected = apiErr && apiErr.status === 401;
+
+    if (isProtected) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border text-center">
+            <div className="inline-flex p-4 bg-blue-50 text-blue-600 rounded-2xl mb-6">
+              <ShieldIcon size={32} />
+            </div>
+            <h2 className="text-2xl font-black text-gray-900 mb-2">Protected Workspace</h2>
+            <p className="text-gray-500 mb-8 font-medium">This workspace requires a password to access.</p>
+            
+            <form 
+              onSubmit={(e) => { e.preventDefault(); authMutation.mutate(password); }}
+              className="space-y-4"
+            >
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                  <LockIcon size={18} />
+                </div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full pl-12 pr-4 py-4 bg-gray-50 border-2 border-transparent focus:border-blue-500 focus:bg-white rounded-2xl focus:outline-none transition-all font-bold text-gray-900"
+                  autoFocus
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={authMutation.isPending || !password}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg transition-all shadow-lg shadow-blue-100 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {authMutation.isPending ? <Loader2 className="animate-spin" size={20} /> : 'Unlock Workspace'}
+              </button>
+            </form>
+            
+            <Link to="/" className="inline-block mt-8 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-widest">
+              Back to Home
+            </Link>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
