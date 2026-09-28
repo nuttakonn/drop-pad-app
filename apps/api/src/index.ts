@@ -5,6 +5,8 @@ import { errorHandler, securityHeaders } from './middleware/error'
 import { loggerMiddleware } from './middleware/logger'
 import { 
   workspaceIdSchema, 
+  roomNameSchema,
+  updateContentSchema,
   createNoteSchema, 
   createWorkspaceSchema,
   authRequestSchema,
@@ -393,9 +395,6 @@ app.post('/api/uploads/presign', async (c) => {
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
   if (new Date(workspace.expires_at as string) < new Date()) throw new HTTPException(410, { message: 'Workspace expired' })
 
-  if (!(await checkAuth(c, workspace))) {
-    throw new HTTPException(401, { message: 'Authentication required' })
-  }
 
   // Quota Checks
   const itemCount = await c.env.DB.prepare(
@@ -451,9 +450,7 @@ app.post('/api/uploads/complete', async (c) => {
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
   if (new Date(workspace.expires_at as string) < new Date()) throw new HTTPException(410, { message: 'Workspace expired' })
 
-  if (!(await checkAuth(c, workspace))) {
-    throw new HTTPException(401, { message: 'Authentication required' })
-  }
+
 
   // Verify file exists in R2
   const object = await c.env.STORAGE.head(fileKey)
@@ -492,7 +489,7 @@ app.post('/api/uploads/multipart/initiate', async (c) => {
   // Check workspace
   const workspace = await c.env.DB.prepare('SELECT expires_at, password_hash, id FROM workspaces WHERE id = ?').bind(workspaceId).first()
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
-  if (!(await checkAuth(c, workspace))) throw new HTTPException(401, { message: 'Authentication required' })
+
 
   const itemId = crypto.randomUUID()
   const safeName = sanitizeFilename(filename)
@@ -537,7 +534,7 @@ app.post('/api/uploads/multipart/sign-part', async (c) => {
   // Check workspace
   const workspace = await c.env.DB.prepare('SELECT id, password_hash FROM workspaces WHERE id = ?').bind(workspaceId).first()
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
-  if (!(await checkAuth(c, workspace))) throw new HTTPException(401, { message: 'Authentication required' })
+
 
   try {
     const aws = getAwsClient(c.env)
@@ -568,7 +565,7 @@ app.post('/api/uploads/multipart/complete', async (c) => {
   // Check workspace
   const workspace = await c.env.DB.prepare('SELECT expires_at, password_hash, id FROM workspaces WHERE id = ?').bind(workspaceId).first()
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
-  if (!(await checkAuth(c, workspace))) throw new HTTPException(401, { message: 'Authentication required' })
+
 
   try {
     const aws = getAwsClient(c.env)
@@ -620,7 +617,7 @@ app.post('/api/uploads/multipart/abort', async (c) => {
   // Check workspace
   const workspace = await c.env.DB.prepare('SELECT id, password_hash FROM workspaces WHERE id = ?').bind(workspaceId).first()
   if (!workspace) throw new HTTPException(404, { message: 'Workspace not found' })
-  if (!(await checkAuth(c, workspace))) throw new HTTPException(401, { message: 'Authentication required' })
+
 
   try {
     const aws = getAwsClient(c.env)
@@ -697,7 +694,9 @@ app.get('/api/files/:workspaceId/:itemId', async (c) => {
     object.writeHttpMetadata(headers)
     headers.set('etag', object.httpEtag)
     // Suggest download filename
-    headers.set('Content-Disposition', `attachment; filename="${item.content}"`)
+    const inline = c.req.query('inline') === 'true'
+    headers.set('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${item.content}"`)
+    headers.set('Access-Control-Allow-Origin', '*')
 
     // object.body is already a ReadableStream, which is perfect for memory-efficient streaming
     return new Response(object.body, { headers })
@@ -736,6 +735,192 @@ app.delete('/api/workspaces/:workspaceId/items/:itemId', async (c) => {
     ).bind(itemId, workspaceId).run()
 
     return c.json({ success: true })
+})
+
+// --- Room Routes ---
+
+app.post('/api/rooms/join', async (c) => {
+  const ip = c.req.header('cf-connecting-ip') || 'unknown'
+  if (!RateLimiter.check(`join-${ip}`, 20, 60000)) {
+    throw new HTTPException(429, { message: 'Too many joins' })
+  }
+
+  const body = await c.req.json().catch(() => ({}))
+  const result = roomNameSchema.safeParse(body.name)
+  if (!result.success) throw new HTTPException(400, { message: 'Invalid room name' })
+  
+  const name = body.name.trim()
+  
+  // Find existing
+  const existing = await c.env.DB.prepare(
+    'SELECT * FROM workspaces WHERE LOWER(name) = LOWER(?) AND expires_at > datetime("now")'
+  ).bind(name).first()
+  
+  if (existing) {
+    const items = await c.env.DB.prepare(
+      'SELECT * FROM workspace_items WHERE workspace_id = ? ORDER BY created_at DESC'
+    ).bind(existing.id).all()
+    
+    return c.json({
+      id: existing.id,
+      name: existing.name,
+      content: existing.content,
+      contentVersion: existing.content_version,
+      expiresAt: existing.expires_at,
+      items: items.results
+    })
+  }
+  
+  // Create new
+  const id = crypto.randomUUID().split('-')[0]
+  const expireMinutes = parseInt(c.env.WORKSPACE_EXPIRE_MINUTES || '10080')
+  const expiresAt = new Date(Date.now() + expireMinutes * 60000).toISOString()
+  
+  await c.env.DB.prepare(
+    'INSERT INTO workspaces (id, name, content, content_version, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(id, name, '', 0, new Date().toISOString(), expiresAt).run()
+  
+  trackEvent(AnalyticsEvent.WORKSPACE_CREATED, { id, isRoom: true })
+  
+  return c.json({
+    id,
+    name,
+    content: '',
+    contentVersion: 0,
+    expiresAt,
+    items: []
+  })
+})
+
+app.get('/api/rooms/:id', async (c) => {
+  const id = c.req.param('id')
+  if (!workspaceIdSchema.safeParse(id).success) throw new HTTPException(400, { message: 'Invalid ID' })
+  
+  const workspace = await c.env.DB.prepare('SELECT * FROM workspaces WHERE id = ?').bind(id).first()
+  if (!workspace) throw new HTTPException(404, { message: 'Room not found' })
+  if (new Date(workspace.expires_at as string) < new Date()) throw new HTTPException(410, { message: 'Room expired' })
+  
+  const items = await c.env.DB.prepare(
+    'SELECT * FROM workspace_items WHERE workspace_id = ? ORDER BY created_at DESC'
+  ).bind(id).all()
+  
+  return c.json({
+    id: workspace.id,
+    name: workspace.name,
+    content: workspace.content,
+    contentVersion: workspace.content_version,
+    expiresAt: workspace.expires_at,
+    items: items.results
+  })
+})
+
+app.put('/api/rooms/:id/content', async (c) => {
+  const id = c.req.param('id')
+  if (!workspaceIdSchema.safeParse(id).success) throw new HTTPException(400, { message: 'Invalid ID' })
+  
+  const body = await c.req.json().catch(() => ({}))
+  const result = updateContentSchema.safeParse(body)
+  if (!result.success) throw new HTTPException(400, { message: 'Invalid input' })
+  
+  const { content, version } = result.data
+  
+  const workspace = await c.env.DB.prepare('SELECT expires_at FROM workspaces WHERE id = ?').bind(id).first()
+  if (!workspace) throw new HTTPException(404, { message: 'Room not found' })
+  if (new Date(workspace.expires_at as string) < new Date()) throw new HTTPException(410, { message: 'Room expired' })
+  
+  const updateResult = await c.env.DB.prepare(
+    'UPDATE workspaces SET content = ?, content_version = content_version + 1 WHERE id = ? AND content_version = ?'
+  ).bind(content, id, version).run()
+  
+  if (updateResult.meta.changes === 0) {
+    throw new HTTPException(409, { message: 'Version conflict' })
+  }
+  
+  return c.json({ version: version + 1 })
+})
+
+app.get('/api/rooms/:id/poll', async (c) => {
+  const id = c.req.param('id')
+  if (!workspaceIdSchema.safeParse(id).success) throw new HTTPException(400, { message: 'Invalid ID' })
+  
+  const workspace = await c.env.DB.prepare(
+    'SELECT content, content_version, expires_at, name FROM workspaces WHERE id = ? AND expires_at > datetime("now")'
+  ).bind(id).first()
+  
+  if (!workspace) throw new HTTPException(410, { message: 'Room not found or expired' })
+  
+  const itemCount = await c.env.DB.prepare(
+    'SELECT COUNT(*) as count FROM workspace_items WHERE workspace_id = ?'
+  ).bind(id).first()
+  
+  return c.json({
+    content: workspace.content,
+    contentVersion: workspace.content_version,
+    itemCount: itemCount?.count || 0,
+    expiresAt: workspace.expires_at
+  })
+})
+
+app.post('/api/rooms/:id/files', async (c) => {
+  const startTime = Date.now()
+  const workspaceId = c.req.param('id')
+  if (!workspaceIdSchema.safeParse(workspaceId).success) throw new HTTPException(400, { message: 'Invalid ID' })
+  
+  const maxSize = parseInt(c.env.MAX_UPLOAD_SIZE_MB || '50') * 1024 * 1024
+  const contentLength = c.req.header('Content-Length')
+  if (contentLength && parseInt(contentLength) > maxSize + 1024 * 100) throw new HTTPException(413, { message: 'File too large' })
+  
+  const formData = await c.req.raw.formData()
+  const file = formData.get('file')
+  if (!file || typeof file === 'string') throw new HTTPException(400, { message: 'Invalid file' })
+  
+  const actualFile = file as unknown as File
+  if (!allowedMimeTypes.includes(actualFile.type)) throw new HTTPException(400, { message: 'File type not allowed' })
+  if (actualFile.size > maxSize) throw new HTTPException(413, { message: 'File too large' })
+  
+  const workspace = await c.env.DB.prepare('SELECT expires_at, id FROM workspaces WHERE id = ?').bind(workspaceId).first()
+  if (!workspace) throw new HTTPException(404, { message: 'Room not found' })
+  if (new Date(workspace.expires_at as string) < new Date()) throw new HTTPException(410, { message: 'Room expired' })
+  
+  const itemCount = await c.env.DB.prepare('SELECT COUNT(*) as count FROM workspace_items WHERE workspace_id = ?').bind(workspaceId).first()
+  const maxFiles = parseInt(c.env.MAX_FILES_PER_WORKSPACE || '100')
+  if ((itemCount?.count as number) >= maxFiles) throw new HTTPException(403, { message: 'File limit reached' })
+  
+  const itemId = crypto.randomUUID()
+  const safeName = sanitizeFilename(actualFile.name)
+  const fileKey = `${workspaceId}/${itemId}-${safeName}`
+  
+  try {
+    await c.env.STORAGE.put(fileKey, actualFile.stream(), { httpMetadata: { contentType: actualFile.type } })
+    await c.env.DB.prepare(
+      'INSERT INTO workspace_items (id, workspace_id, type, file_key, content, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(itemId, workspaceId, 'file', fileKey, safeName, new Date().toISOString()).run()
+    
+    trackEvent(AnalyticsEvent.UPLOAD_SUCCESS, { workspaceId, size: actualFile.size, duration: Date.now() - startTime })
+    return c.json({ id: itemId, fileKey }, 201)
+  } catch (err: any) {
+    throw err
+  }
+})
+
+app.delete('/api/rooms/:workspaceId/items/:itemId', async (c) => {
+  const { workspaceId, itemId } = c.req.param()
+  if (!workspaceIdSchema.safeParse(workspaceId).success) throw new HTTPException(400, { message: 'Invalid ID' })
+  
+  const workspace = await c.env.DB.prepare('SELECT expires_at, id FROM workspaces WHERE id = ?').bind(workspaceId).first()
+  if (!workspace) throw new HTTPException(404, { message: 'Room not found' })
+  
+  const item = await c.env.DB.prepare('SELECT * FROM workspace_items WHERE id = ? AND workspace_id = ?').bind(itemId, workspaceId).first()
+  if (!item) throw new HTTPException(404, { message: 'Item not found' })
+  
+  if (item.type === 'file' && item.file_key) {
+    try {
+      await c.env.STORAGE.delete(item.file_key as string)
+    } catch (err) {}
+  }
+  
+  await c.env.DB.prepare('DELETE FROM workspace_items WHERE id = ? AND workspace_id = ?').bind(itemId, workspaceId).run()
+  return c.json({ success: true })
 })
 
 // Cron Trigger Handler

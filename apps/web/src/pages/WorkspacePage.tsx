@@ -1,202 +1,61 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, type Room } from '../lib/api';
 import { useUpload } from '../lib/useUpload';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useSharedText } from '../lib/useSharedText';
+import { useState, useCallback, useEffect } from 'react';
 import { 
   File as FileIcon, Type, Upload, ArrowLeft, Download, Clock, 
   ExternalLink, Loader2, AlertCircle, Copy, QrCode, X, 
-  RotateCcw, ImageIcon, FileText, Trash2, Lock as LockIcon, Shield as ShieldIcon
+  RotateCcw, ImageIcon, FileText, Trash2, CheckCircle, Save
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import toast from 'react-hot-toast';
-import { formatDistanceToNow, isBefore } from 'date-fns';
+import { formatDistanceToNow, isBefore, formatDistanceStrict } from 'date-fns';
 import { QRCodeSVG } from 'qrcode.react';
 
 export default function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
-  const [note, setNote] = useState('');
-  const [isDragging, setIsDragging] = useState(false);
-  const [showQr, setShowQr] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<string>('');
-  const [isExpired, setIsExpired] = useState(false);
-  const [password, setPassword] = useState('');
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { data: workspace, isLoading, error } = useQuery({
-    queryKey: ['workspace', id],
-    queryFn: () => api.getWorkspace(id!),
+  const { data: room, isLoading, error } = useQuery({
+    queryKey: ['room', id],
+    queryFn: () => api.getRoom(id!),
     enabled: !!id,
-    refetchInterval: 5000,
-    retry: (failureCount, error: any) => {
-      if (error?.status === 401) return false;
-      return failureCount < 2;
-    },
+    retry: 2,
   });
 
-  const authMutation = useMutation({
-    mutationFn: (pwd: string) => api.authWorkspace(id!, pwd),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspace', id] });
-      toast.success('Authenticated');
-    },
-    onError: (err: any) => {
-      toast.error(err.message || 'Invalid password');
-    }
-  });
-
-  const { uploads, uploadFile, cancelUpload, retryUpload, removeUpload } = useUpload(id!, () => {
-    queryClient.invalidateQueries({ queryKey: ['workspace', id] });
-  });
-
-  // Countdown effect
+  // Poll for item count changes
   useEffect(() => {
-    if (!workspace) return;
-    
-    const timer = setInterval(() => {
-      const expiry = new Date(workspace.expires_at);
-      const now = new Date();
-      
-      if (isBefore(expiry, now)) {
-        setIsExpired(true);
-        setTimeLeft('Expired');
-        clearInterval(timer);
-      } else {
-        setTimeLeft(formatDistanceToNow(expiry, { addSuffix: true }));
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [workspace]);
-
-  // Clipboard support
-  const onPaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items;
-    let found = false;
-
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          uploadFile(file);
-          found = true;
-          toast.success('Pasted image from clipboard');
+    if (!id) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.pollRoom(id);
+        const currentItems = queryClient.getQueryData<Room>(['room', id])?.items?.length || 0;
+        if (res.itemCount !== currentItems) {
+          queryClient.invalidateQueries({ queryKey: ['room', id] });
         }
-      } else if (items[i].kind === 'file') {
-        const file = items[i].getAsFile();
-        if (file) {
-          uploadFile(file);
-          found = true;
-          toast.success('Pasted file from clipboard');
-        }
+      } catch (err) {
+        console.error('Failed to poll items', err);
       }
-    }
-    
-    if (found) e.preventDefault();
-  }, [uploadFile]);
-
-  const noteMutation = useMutation({
-    mutationFn: (content: string) => api.addNote(id!, content),
-    onSuccess: () => {
-      setNote('');
-      queryClient.invalidateQueries({ queryKey: ['workspace', id] });
-      toast.success('Note added');
-    },
-    onError: (err: any) => {
-      toast.error(err.message || 'Failed to add note');
-    }
-
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (itemId: string) => api.deleteItem(id!, itemId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspace', id] });
-      toast.success('Item deleted');
-    },
-    onError: (err: any) => {
-      toast.error(err.message || 'Failed to delete item');
-    }
-  });
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    files.forEach(file => uploadFile(file));
-  }, [uploadFile]);
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success('Link copied');
-  };
-
-  const copyNote = (content: string) => {
-    navigator.clipboard.writeText(content);
-    toast.success('Note copied');
-  };
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [id, queryClient]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="animate-spin text-blue-600" size={40} />
-          <p className="text-gray-500 font-medium">Loading workspace...</p>
+          <p className="text-gray-500 font-medium">Loading room...</p>
         </div>
       </div>
     );
   }
 
-  if (error || isExpired) {
+  if (error || !room) {
     const apiErr = error as any;
-    const isReallyExpired = isExpired || (apiErr && apiErr.status === 410);
-    const isProtected = apiErr && apiErr.status === 401;
-
-    if (isProtected) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-          <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border text-center">
-            <div className="inline-flex p-4 bg-blue-50 text-blue-600 rounded-2xl mb-6">
-              <ShieldIcon size={32} />
-            </div>
-            <h2 className="text-2xl font-black text-gray-900 mb-2">Protected Workspace</h2>
-            <p className="text-gray-500 mb-8 font-medium">This workspace requires a password to access.</p>
-            
-            <form 
-              onSubmit={(e) => { e.preventDefault(); authMutation.mutate(password); }}
-              className="space-y-4"
-            >
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  <LockIcon size={18} />
-                </div>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  className="w-full pl-12 pr-4 py-4 bg-gray-50 border-2 border-transparent focus:border-blue-500 focus:bg-white rounded-2xl focus:outline-none transition-all font-bold text-gray-900"
-                  autoFocus
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={authMutation.isPending || !password}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg transition-all shadow-lg shadow-blue-100 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {authMutation.isPending ? <Loader2 className="animate-spin" size={20} /> : 'Unlock Workspace'}
-              </button>
-            </form>
-            
-            <Link to="/" className="inline-block mt-8 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-widest">
-              Back to Home
-            </Link>
-          </div>
-        </div>
-      );
-    }
-
+    const isExpired = apiErr?.status === 410;
+    
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-sm border text-center">
@@ -204,12 +63,12 @@ export default function WorkspacePage() {
             <AlertCircle size={32} />
           </div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">
-            {isReallyExpired ? 'Workspace Expired' : 'Workspace Error'}
+            {isExpired ? 'Room Expired' : 'Room Error'}
           </h2>
           <p className="text-gray-500 mb-6 leading-relaxed">
-            {isReallyExpired 
-              ? 'This workspace has reached its time limit and has been deleted for your privacy.'
-              : apiErr?.message || 'We could not load the workspace you are looking for.'}
+            {isExpired 
+              ? 'This room has reached its time limit and has been deleted for your privacy.'
+              : apiErr?.message || 'We could not load the room you are looking for.'}
           </p>
           <Link 
             to="/" 
@@ -222,7 +81,129 @@ export default function WorkspacePage() {
     );
   }
 
-  if (!workspace) return null;
+  return <RoomContent room={room} />;
+}
+
+function RoomContent({ room }: { room: Room }) {
+  const queryClient = useQueryClient();
+  const [isDragging, setIsDragging] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<string>('');
+  const [isExpired, setIsExpired] = useState(false);
+  const [activeTab, setActiveTab] = useState<'note' | 'upload'>('note');
+
+  const { text, setText, saveStatus } = useSharedText({
+    roomId: room.id,
+    initialContent: room.content || '',
+    initialVersion: room.contentVersion || 0
+  });
+
+  const { uploads, uploadFile, cancelUpload, retryUpload, removeUpload } = useUpload(room.id, () => {
+    queryClient.invalidateQueries({ queryKey: ['room', room.id] });
+  });
+
+  // Countdown effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const expiry = new Date(room.expiresAt);
+      const now = new Date();
+      
+      if (isBefore(expiry, now)) {
+        setIsExpired(true);
+        setTimeLeft('Expired');
+        clearInterval(timer);
+      } else {
+        setTimeLeft(formatDistanceStrict(expiry, now, { addSuffix: true }));
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [room.expiresAt]);
+
+  const onPaste = useCallback((e: React.ClipboardEvent) => {
+    // If active in text area, let native paste handle text, but still catch files
+    const items = e.clipboardData.items;
+    let foundFile = false;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1 || items[i].kind === 'file') {
+        const file = items[i].getAsFile();
+        if (file) {
+          uploadFile(file);
+          setActiveTab('upload');
+          foundFile = true;
+          toast.success('Pasted file from clipboard');
+        }
+      }
+    }
+    
+    // Only prevent default if we handled a file, so text pasting in textarea works normally
+    if (foundFile) e.preventDefault();
+  }, [uploadFile]);
+
+  const deleteMutation = useMutation({
+    mutationFn: (itemId: string) => api.deleteRoomItem(room.id, itemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['room', room.id] });
+      toast.success('Item deleted');
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Failed to delete item');
+    }
+  });
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      files.forEach(file => uploadFile(file));
+      setActiveTab('upload');
+    }
+  }, [uploadFile]);
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast.success('Link copied');
+  };
+
+  const copyImageToClipboard = async (imageUrl: string) => {
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      
+      if (blob.type !== 'image/png') {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = reject;
+        });
+        img.src = URL.createObjectURL(blob);
+        
+        await new Promise<void>((resolve) => { img.onload = () => resolve(); });
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d')!.drawImage(img, 0, 0);
+        
+        const pngBlob = await new Promise<Blob>((resolve) => 
+          canvas.toBlob(b => resolve(b!), 'image/png')
+        );
+        
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+        URL.revokeObjectURL(img.src);
+      } else {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      }
+      toast.success('Copied image to clipboard!');
+    } catch {
+      toast.error('Failed to copy image');
+    }
+  };
+
+  const isImageFile = (filename: string) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(filename || '');
 
   return (
     <div 
@@ -241,11 +222,14 @@ export default function WorkspacePage() {
             </Link>
             <div>
               <h1 className="font-bold text-lg flex items-center gap-2 text-gray-900 leading-none mb-1">
-                Workspace <span className="text-blue-600 font-mono tracking-tight">{id}</span>
+                {room.name}
               </h1>
-              <div className="text-[10px] sm:text-xs text-gray-500 flex items-center gap-1 font-medium">
-                <Clock size={12} className={isExpired ? 'text-red-500' : 'text-blue-500'} />
-                <span>Expires {timeLeft}</span>
+              <div className="text-[10px] sm:text-xs text-gray-500 flex items-center gap-2 font-medium">
+                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono">{room.id}</span>
+                <span className="flex items-center gap-1">
+                  <Clock size={12} className={isExpired ? 'text-red-500' : 'text-blue-500'} />
+                  {timeLeft}
+                </span>
               </div>
             </div>
           </div>
@@ -274,53 +258,75 @@ export default function WorkspacePage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8">
-        {/* Input Area */}
-        <div className="bg-white rounded-3xl shadow-sm border p-5 mb-8 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold uppercase tracking-wider">
-                <Type size={14} /> Note
-              </div>
-              <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-100 text-gray-600 rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors">
-                <Upload size={14} /> Upload
-                <input 
-                  type="file" 
-                  multiple 
-                  className="hidden" 
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    files.forEach(file => uploadFile(file));
-                  }}
+        {/* Main Input/Upload Card */}
+        <div className="bg-white rounded-3xl shadow-sm border overflow-hidden mb-8">
+          <div className="flex border-b border-gray-100">
+            <button 
+              onClick={() => setActiveTab('note')}
+              className={`flex-1 py-4 text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${
+                activeTab === 'note' ? 'text-blue-600 bg-blue-50/50 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <Type size={16} /> Shared Text
+            </button>
+            <button 
+              onClick={() => setActiveTab('upload')}
+              className={`flex-1 py-4 text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${
+                activeTab === 'upload' ? 'text-blue-600 bg-blue-50/50 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <Upload size={16} /> Upload Files
+            </button>
+          </div>
+
+          <div className="p-6">
+            {activeTab === 'note' ? (
+              <div className="relative">
+                <div className="absolute top-2 right-2 z-10 flex items-center justify-end">
+                  {saveStatus === 'saving' && (
+                    <div className="flex items-center gap-1.5 text-blue-500 bg-blue-50 px-2 py-1 rounded-md text-xs font-semibold animate-pulse">
+                      <Loader2 size={12} className="animate-spin" /> Saving...
+                    </div>
+                  )}
+                  {saveStatus === 'saved' && (
+                    <div className="flex items-center gap-1.5 text-green-600 bg-green-50 px-2 py-1 rounded-md text-xs font-semibold animate-in fade-in duration-300">
+                      <CheckCircle size={12} /> Saved
+                    </div>
+                  )}
+                  {saveStatus === 'error' && (
+                    <div className="flex items-center gap-1.5 text-red-600 bg-red-50 px-2 py-1 rounded-md text-xs font-semibold">
+                      <AlertCircle size={12} /> Error
+                    </div>
+                  )}
+                </div>
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="พิมพ์อะไรก็ได้ที่นี่... ทุกคนในห้องจะเห็นเหมือนกัน"
+                  className="w-full min-h-[200px] p-4 text-gray-800 bg-gray-50 border-2 border-transparent focus:bg-white focus:border-blue-200 rounded-2xl focus:outline-none resize-y text-base leading-relaxed transition-all"
                 />
-              </label>
-            </div>
-            {noteMutation.isPending && (
-              <div className="flex items-center gap-2 text-blue-600 text-xs font-bold animate-pulse">
-                <Loader2 size={12} className="animate-spin" />
-                SAVING...
+              </div>
+            ) : (
+              <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
+                <div className="inline-block p-4 bg-white shadow-sm rounded-full mb-4 text-blue-500">
+                  <Upload size={32} />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">Upload Files</h3>
+                <p className="text-sm text-gray-500 mb-6">Drag and drop files here, or click to browse</p>
+                <label className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl font-medium cursor-pointer transition-colors shadow-sm inline-flex items-center gap-2">
+                  <FileIcon size={18} /> Browse Files
+                  <input 
+                    type="file" 
+                    multiple 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      files.forEach(file => uploadFile(file));
+                    }}
+                  />
+                </label>
               </div>
             )}
-          </div>
-          
-          <textarea
-            ref={textAreaRef}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Type or paste anything here... Markdown is supported!"
-            className="w-full min-h-[140px] p-0 text-gray-800 focus:outline-none resize-none text-base leading-relaxed placeholder:text-gray-300"
-          />
-          
-          <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-50">
-            <p className="text-[10px] text-gray-400 font-medium">
-              Pro tip: You can paste images or files directly with Ctrl+V
-            </p>
-            <button
-              onClick={() => note && noteMutation.mutate(note)}
-              disabled={!note || noteMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-2xl font-bold transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-100 active:scale-95"
-            >
-              Post Note
-            </button>
           </div>
         </div>
 
@@ -376,90 +382,81 @@ export default function WorkspacePage() {
           </div>
         )}
 
-        {/* Item List */}
-        <div className="space-y-6">
-          {workspace.items.map((item) => (
-            <div key={item.id} className="bg-white rounded-3xl border p-6 shadow-sm hover:shadow-md transition-all group">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-xl ${item.type === 'note' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
-                    {item.type === 'note' ? <Type size={18} /> : <FileIcon size={18} />}
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest font-black text-gray-400">
-                      {item.type === 'note' ? 'Text Note' : 'Shared File'}
-                    </p>
-                    <p className="text-[10px] text-gray-400 font-medium">
-                      {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {item.type === 'note' && (
-                    <button 
-                      onClick={() => copyNote(item.content)}
-                      className="p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 rounded-xl transition-all"
-                      title="Copy content"
-                    >
-                      <Copy size={18} />
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => {
-                      if (confirm('Delete this item?')) {
-                        deleteMutation.mutate(item.id);
-                      }
-                    }}
-                    disabled={deleteMutation.isPending}
-                    className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all disabled:opacity-50"
-                    title="Delete item"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-              
-              {item.type === 'note' ? (
-                <div className="prose prose-blue prose-sm max-w-none text-gray-800 leading-relaxed font-medium">
-                  <ReactMarkdown>{item.content}</ReactMarkdown>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between bg-gray-50/50 rounded-2xl p-4 border border-gray-100">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-white text-blue-600 rounded-2xl border shadow-sm">
-                      {item.content.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? <ImageIcon size={24} /> : <FileText size={24} />}
+        {/* Item List (Files only now) */}
+        {room.items.length > 0 && (
+          <div className="space-y-6">
+            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider px-1">Files ({room.items.length})</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {room.items.map((item) => {
+                const isImg = isImageFile(item.content || '');
+                const fileUrl = api.getFileUrl(room.id, item.id, true);
+                
+                return (
+                  <div key={item.id} className="bg-white rounded-3xl border shadow-sm hover:shadow-md transition-all group overflow-hidden flex flex-col">
+                    {isImg ? (
+                      <div className="bg-gray-100 flex items-center justify-center relative overflow-hidden border-b border-gray-100 group-hover:bg-gray-200 transition-colors">
+                        <img 
+                          src={fileUrl} 
+                          alt={item.content || 'Image preview'} 
+                          className="max-h-60 w-full object-contain"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-32 bg-gray-50 flex flex-col items-center justify-center border-b border-gray-100">
+                        <div className="p-4 bg-white text-blue-500 rounded-2xl shadow-sm">
+                          <FileText size={32} />
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="p-4 flex-1 flex flex-col">
+                      <div className="flex-1 min-w-0 mb-4">
+                        <p className="font-bold text-gray-900 truncate text-sm" title={item.content || ''}>
+                          {item.content}
+                        </p>
+                        <p className="text-[10px] text-gray-400 font-medium mt-1">
+                          {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        {isImg && (
+                          <button 
+                            onClick={() => copyImageToClipboard(fileUrl)}
+                            className="flex-1 py-2 bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1 border border-gray-200"
+                          >
+                            <Copy size={14} /> Copy
+                          </button>
+                        )}
+                        <a 
+                          href={api.getFileUrl(room.id, item.id)} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1 border border-blue-100"
+                        >
+                          <Download size={14} /> Save
+                        </a>
+                        <button 
+                          onClick={() => {
+                            if (confirm('Delete this file?')) {
+                              deleteMutation.mutate(item.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                          className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all disabled:opacity-50 border border-transparent"
+                          title="Delete file"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-gray-900 truncate max-w-[180px] sm:max-w-md">{item.content}</p>
-                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Ready for download</p>
-                    </div>
                   </div>
-                  <a 
-                    href={api.getFileUrl(id!, item.id)} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="p-3 bg-white hover:bg-blue-600 hover:text-white text-blue-600 rounded-2xl border shadow-sm transition-all hover:scale-105 active:scale-95"
-                    title="Download File"
-                  >
-                    <Download size={22} />
-                  </a>
-                </div>
-              )}
+                );
+              })}
             </div>
-          ))}
-
-          {workspace.items.length === 0 && uploads.length === 0 && (
-            <div className="text-center py-24 bg-gray-50/50 rounded-[3rem] border-4 border-dashed border-gray-100">
-              <div className="inline-block p-6 bg-white shadow-xl shadow-gray-100 rounded-3xl mb-6 text-gray-300 border border-gray-50">
-                <Upload size={40} />
-              </div>
-              <h3 className="text-xl font-black text-gray-900 mb-2">Drop it like it's hot</h3>
-              <p className="text-gray-400 text-sm max-w-xs mx-auto font-medium">
-                Paste an image, drop a file, or type a note. Everything stays here for 24 hours.
-              </p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
 
       {/* Drag Overlay */}
@@ -493,7 +490,7 @@ export default function WorkspacePage() {
               />
             </div>
             <p className="text-center text-sm text-gray-500 font-medium leading-relaxed">
-              Open your camera on another device to instantly access this workspace.
+              Open your camera on another device to instantly access this room.
             </p>
             <button 
               onClick={copyLink}

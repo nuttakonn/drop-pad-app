@@ -362,23 +362,24 @@ pnpm --filter api deploy
 
 # MVP FEATURES
 
-## 1. Workspace
+## 1. Workspace (Rooms)
 
 Users can:
 
-* create workspace
-* share workspace link
-* auto expire workspace
+* create or join a room using a custom name (case-insensitive)
+* share room link
+* auto expire room
+* no password required
 
 ---
 
-## 2. Text Notes
+## 2. Shared Text
 
 Support:
 
-* markdown
-* autosave
-* syntax highlighting
+* real-time collaborative text editing
+* auto-save (debounced)
+* optimistic concurrency control
 
 ---
 
@@ -396,7 +397,7 @@ Support:
 
 Configurable:
 
-* 10 minutes
+* 7 days (default)
 * 1 hour
 * 24 hours
 
@@ -418,30 +419,49 @@ Users can:
 
 # API CONTRACT
 
-# CREATE WORKSPACE
+# JOIN ROOM
 
-POST /api/workspaces
+POST /api/rooms/join
+Request: `{ "name": "room_name" }`
 
 Response:
 
 ```json id="a1g0ke"
 {
   "id": "abcd1234",
-  "expiresAt": "2026-05-15T12:00:00Z"
+  "name": "room_name",
+  "content": "...",
+  "contentVersion": 1,
+  "expiresAt": "2026-05-15T12:00:00Z",
+  "items": []
 }
 ```
 
 ---
 
-# GET WORKSPACE
+# GET ROOM
 
-GET /api/workspaces/:id
+GET /api/rooms/:id
+
+---
+
+# POLL ROOM
+
+GET /api/rooms/:id/poll
+Response: `{ "content": "...", "contentVersion": 2, "itemCount": 5, "expiresAt": "..." }`
+
+---
+
+# UPDATE CONTENT
+
+PUT /api/rooms/:id/content
+Request: `{ "content": "...", "version": 1 }`
 
 ---
 
 # UPLOAD FILE
 
-POST /api/workspaces/:id/files
+POST /api/rooms/:id/files
 
 Content-Type:
 

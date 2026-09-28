@@ -19,6 +19,23 @@ export interface WorkspaceItem {
   created_at: string;
 }
 
+export interface Room {
+  id: string;
+  name: string;
+  content: string;
+  contentVersion: number;
+  expiresAt: string;
+  items: WorkspaceItem[];
+}
+
+export interface PollResponse {
+  content: string;
+  contentVersion: number;
+  itemCount: number;
+  expiresAt: string;
+}
+
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -36,10 +53,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const id = setTimeout(() => controller.abort(), 30000); // Increased to 30s
 
   const headers = new Headers(options?.headers);
-  const token = sessionStorage.getItem('dp_token');
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
   try {
     const response = await fetch(url, {
@@ -72,6 +85,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  joinRoom: (name: string) => 
+    request<Room>('/api/rooms/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    }),
+
+  getRoom: (id: string) => request<Room>(`/api/rooms/${id}`),
+
+  updateContent: (id: string, content: string, version: number) => 
+    request<{ version: number }>(`/api/rooms/${id}/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, version })
+    }),
+
+  pollRoom: (id: string) => request<PollResponse>(`/api/rooms/${id}/poll`),
+
+  deleteRoomItem: (roomId: string, itemId: string) => 
+    request<{ success: true }>(`/api/rooms/${roomId}/items/${itemId}`, {
+      method: 'DELETE',
+    }),
+
   createWorkspace: (id?: string, password?: string) => 
     request<{ id: string; expiresAt: string; isProtected: boolean }>('/api/workspaces', { 
       method: 'POST',
@@ -273,7 +309,10 @@ export const api = {
     body: JSON.stringify({ content }),
   }),
   
-  getFileUrl: (workspaceId: string, itemId: string) => `${API_BASE_URL}/api/files/${workspaceId}/${itemId}`,
+  getFileUrl: (workspaceId: string, itemId: string, inline?: boolean) => {
+    const url = `${API_BASE_URL}/api/files/${workspaceId}/${itemId}`;
+    return inline ? `${url}?inline=true` : url;
+  },
 };
 
 // For backward compatibility

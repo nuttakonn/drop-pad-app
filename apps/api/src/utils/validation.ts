@@ -6,6 +6,16 @@ export const createNoteSchema = z.object({
   content: z.string().min(1).max(50000)
 })
 
+export const roomNameSchema = z.string()
+  .min(1, 'Room name is required')
+  .max(50, 'Room name must be 50 characters or less')
+  .regex(/^[^\\/\x00-\x1f]+$/, 'Room name contains invalid characters')
+
+export const updateContentSchema = z.object({
+  content: z.string().max(100000),
+  version: z.number().int().min(0),
+})
+
 export const createWorkspaceSchema = z.object({
   id: workspaceIdSchema.optional(),
   password: z.string().min(4).max(64).optional()
@@ -69,6 +79,7 @@ export const allowedMimeTypes = [
   'text/markdown',
   'application/json',
   'application/zip',
+  'application/x-zip-compressed',
   // Microsoft Office
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

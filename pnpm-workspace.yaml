@@ -2,5 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  aws-sdk: set this to true or false
-  esbuild: set this to true or false
+  aws-sdk: true
+  esbuild: true
+  sharp: true
+  workerd: true
