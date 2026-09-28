@@ -110,6 +110,6 @@ export function sanitizeFilename(filename: string): string {
     sanitized = sanitized.replace(/\.\./g, '.')
   }
 
-  // 5. Final pass: only allow safe characters (alphanumeric, dot, underscore, dash)
-  return sanitized.replace(/[^a-zA-Z0-9.\-_]/g, '_')
+  // 5. Final pass: remove control characters and dangerous symbols, but keep Unicode/Thai/spaces
+  return sanitized.replace(/[\x00-\x1F\x7F<>:"|?*]/g, '_')
 }
