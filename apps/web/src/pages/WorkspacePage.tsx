@@ -172,33 +172,39 @@ function RoomContent({ room }: { room: Room }) {
       const response = await fetch(imageUrl);
       const blob = await response.blob();
       
+      let pngBlob = blob;
+      
       if (blob.type !== 'image/png') {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         await new Promise<void>((resolve, reject) => {
           img.onload = () => resolve();
           img.onerror = reject;
+          img.src = URL.createObjectURL(blob);
         });
-        img.src = URL.createObjectURL(blob);
-        
-        await new Promise<void>((resolve) => { img.onload = () => resolve(); });
         
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
         canvas.getContext('2d')!.drawImage(img, 0, 0);
         
-        const pngBlob = await new Promise<Blob>((resolve) => 
+        pngBlob = await new Promise<Blob>((resolve) => 
           canvas.toBlob(b => resolve(b!), 'image/png')
         );
-        
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
         URL.revokeObjectURL(img.src);
-      } else {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       }
+      
+      const htmlBlob = new Blob([`<img src="${imageUrl}" />`], { type: 'text/html' });
+      
+      await navigator.clipboard.write([
+        new ClipboardItem({ 
+          'image/png': pngBlob,
+          'text/html': htmlBlob 
+        })
+      ]);
       toast.success('Copied image to clipboard!');
-    } catch {
+    } catch (error) {
+      console.error('Copy failed:', error);
       toast.error('Failed to copy image');
     }
   };
