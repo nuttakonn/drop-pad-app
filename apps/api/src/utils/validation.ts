@@ -29,7 +29,7 @@ export const presignRequestSchema = z.object({
   workspaceId: workspaceIdSchema,
   filename: z.string().min(1).max(255),
   contentType: z.string().min(1).max(100),
-  size: z.number().positive().max(1024 * 1024 * 1024) // Max 1GB
+  size: z.number().positive().max(2048 * 1024 * 1024) // Max 2GB
 })
 
 export const completeUploadSchema = z.object({

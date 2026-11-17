@@ -11,7 +11,7 @@ export interface UploadStatus {
   controller?: AbortController;
 }
 
-const MAX_FILE_SIZE = 512 * 1024 * 1024; // 512MB matching wrangler.toml
+const MAX_FILE_SIZE = 2048 * 1024 * 1024; // 2048MB (2GB) matching wrangler.toml
 
 export function useUpload(workspaceId: string, onSuccess: () => void) {
   const [uploads, setUploads] = useState<UploadStatus[]>([]);
